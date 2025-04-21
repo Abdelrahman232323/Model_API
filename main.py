@@ -1,19 +1,15 @@
+# main.py
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-import pandas as pd
-import numpy as np
-from sentence_transformers import SentenceTransformer
-from sklearn.metrics.pairwise import cosine_similarity
+from model.bert_model import BERTJobRecommender  
 import os
 
 app = FastAPI()
 
-# Globals
-model = None
-df = None
-job_embeddings = None
+# Global model instance
+recommender = None
 
-# Define input schema
+# Pydantic schema for user input
 class UserProfile(BaseModel):
     name: str
     degree: str
@@ -22,67 +18,33 @@ class UserProfile(BaseModel):
     experience: int
     skills: str
 
-# Load data and model on startup
 @app.on_event("startup")
-def load_model_and_data():
-    global model, df, job_embeddings
+def load_model():
+    global recommender
+    data_path = "data/wuzzuf_02_4_part3.csv"  
+    if not os.path.exists(data_path):
+        raise FileNotFoundError(f"Dataset not found at {data_path}")
+    recommender = BERTJobRecommender(data_path)
 
-    DATA_PATH = "data/wuzzuf_02_4_part3.csv"
-    if not os.path.exists(DATA_PATH):
-        raise FileNotFoundError(f"Dataset not found at {DATA_PATH}")
-
-    df = pd.read_csv(DATA_PATH)
-    df.rename(columns={
-        'Job_Title': 'Job_Title',
-        'Company_Name': 'Company_Name',
-        'Job_Link': 'apply_link',
-        'Skills': 'Skills',
-        'Job_Description': 'Job_Description'
-    }, inplace=True)
-    df.dropna(subset=['Job_Title', 'Company_Name', 'Skills', 'Job_Description'], inplace=True)
-    df['full_text'] = df['Job_Title'] + ' at ' + df['Company_Name'] + '. ' + \
-                      df['Job_Description'] + ' Skills: ' + df['Skills']
-
-    model = SentenceTransformer('all-MiniLM-L6-v2')
-    job_embeddings = model.encode(df['full_text'].tolist(), show_progress_bar=True)
-
-
-# Root endpoint
 @app.get("/")
-def read_root():
-    return {"message": "Job Recommendation API"}
+def root():
+    return {"message": "BERT Job Recommender API is up and running!"}
 
-# Recommendation endpoint
 @app.post("/recommend")
 def recommend_jobs(profile: UserProfile):
     try:
-        global df, job_embeddings, model
-
-        user_profile_text = f"{profile.degree} in {profile.major}, GPA {profile.gpa}, " \
-                            f"{profile.experience} years experience. Skills: {profile.skills}"
-
-        user_embedding = model.encode([user_profile_text])[0]
-        similarities = cosine_similarity([user_embedding], job_embeddings)[0]
-        df['similarity'] = similarities
-
-        top_10 = df.sort_values(by='similarity', ascending=False).head(10)
-
-        results = [
-            {
-                "job_title": row['Job_Title'],
-                "company_name": row['Company_Name'],
-                "skills": row['Skills'],
-                "apply_link": row['apply_link'],
-                "similarity": float(row['similarity'])
-            }
-            for _, row in top_10.iterrows()
-        ]
-
-        return {"recommended_jobs": results}
-
+        global recommender
+        user_text = f"{profile.degree} in {profile.major}, GPA {profile.gpa}, " \
+                    f"{profile.experience} years experience. Skills: {profile.skills}"
+        recommendations = recommender.recommend(user_text, top_k=10)
+        return {"recommended_jobs": recommendations}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error processing request: {str(e)}")
+        print(f"[ERROR] {str(e)}")  # ✅ Log error in terminal
+        raise HTTPException(status_code=500, detail=str(e))
 
+
+# Run with:
+# uvicorn main:app --reload
 # Run the app safely on Windows
 if __name__ == "__main__":
     import uvicorn

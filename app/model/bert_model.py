@@ -6,6 +6,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 class BERTJobRecommender:
     def __init__(self, data_path: str):
         self.df = pd.read_csv(data_path)
+        
         self.df.dropna(subset=['Job_Title', 'Company_Name', 'Skills', 'Job_Description'], inplace=True)
         self.df['full_text'] = self.df['Job_Title'] + ' at ' + self.df['Company_Name'] + '. ' + \
                                self.df['Job_Description'] + ' Skills: ' + self.df['Skills']
